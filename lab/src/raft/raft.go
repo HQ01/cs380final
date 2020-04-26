@@ -266,21 +266,6 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		DPrintf("%d grant vote to %d", rf.me, args.CandidateId)
 	}
 	return
-
-	// if rf.vot
-	// if args.LastLogIndex != rf.logs[len(rf.logs)-1].Index || args.LastLogTerm != rf.logs[len(rf.logs)-1].Term{
-	// 	reply.VoteGranted = false
-	// 	return
-	// } else {
-	// 	if rf.votedFor == -1 || rf.votedFor == args.CandidateId {
-	// 		reply.VoteGranted = true
-	// 		rf.votedFor = args.CandidateId
-	// 		rf.voteTimeOutBase = time.Now()
-	// 		rf.voteTimeOutDuration = time.Duration(rand.Intn(VoteTimeOutUpper - VoteTimeOutLower + 1) + VoteTimeOutLower) * time.Millisecond
-	// 	}
-	// 	return
-		
-	// }
 }
 
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
@@ -316,22 +301,6 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 			new_len := len(rf.logs)
 			DPrintf("replica %d accept AppendEntries request from %d at term %d, args entries len is %d, args prev log index is %d, old log length is %d, new log length is %d", 
 			rf.me, args.LeaderId, args.Term, len(args.Entries), args.PrevLogIndex, pre_len, new_len)
-
-			// if args.PrevLogIndex != rf.logs[len(rf.logs)-1].Index {
-			// 	// meaning we overwrite some entries
-			// 	rf.logs = rf.logs[:args.PrevLogIndex+1]
-			// }
-			// rf.logs = append(rf.logs, args.Entries...)
-
-			//check leaderCommit and commitIndex
-			// if args.LeaderCommit > rf.commitIndex {
-			// 	if args.LeaderCommit < rf.logs[len(rf.logs)-1].Index {
-			// 		rf.commitIndex = args.LeaderCommit
-			// 	} else {
-			// 		rf.commitIndex = rf.logs[len(rf.logs)-1].Index
-			// 	}
-			// 	rf.applyChCond.Broadcast()
-			// }
 		
 		
 		
@@ -514,51 +483,6 @@ func (rf *Raft) startAgreement(parsed interface{}) {
 		for i := 0; i < len(rf.peers); i++ {
 			if i != rf.me {
 				go rf.heartBeatPerPeer(i, term)
-				// go func (x int) {
-				// 	rf.mu.Lock()
-				// 	appendArgs := AppendEntriesArgs{Term: rf.currentTerm, LeaderId: rf.me, LeaderCommit: rf.commitIndex, PrevLogIndex: rf.logs[rf.nextIndex[x]-1].Index, PrevLogTerm: rf.logs[rf.nextIndex[x]-1].Term}
-				// 	appendReply := AppendEntriesReply{}
-				// 	entries := make([]Entry, len(rf.logs[(appendArgs.PrevLogIndex+1):]))
-				// 	copy(entries, rf.logs[(appendArgs.PrevLogIndex+1):])
-				// 	appendArgs.Entries = entries
-
-
-				// 	//lastIndexTmp := rf.logs[len(rf.logs)-1].Index
-				// 	//idLastIndexTmp := rf.nextIndex[x]
-				// 	rf.mu.Unlock()
-				// 	ok := rf.sendAppendEntries(x, &appendArgs, &appendReply)
-				// 	if !ok {
-				// 		return
-				// 	} else {
-				// 		rf.mu.Lock()
-				// 		defer rf.mu.Unlock()
-				// 		if rf.status != Leader {
-				// 			return
-				// 		}
-				// 		replyTerm := appendReply.Term
-				// 		if rf.currentTerm < replyTerm {
-				// 			rf.revertToFollower(replyTerm)
-				// 			return
-				// 		}
-				// 		if replyTerm < rf.currentTerm {
-				// 			DPrintf("[%d] Received staled RPC response from %d to %d, continue ", rf.me, rf.me, x)
-				// 			return
-				// 		}
-				// 		if appendReply.Success {
-				// 			DPrintf("leader %d at term %d append entry request to replica %d succeed", rf.me, rf.currentTerm, x)
-				// 			prev_nextidx := rf.nextIndex[x]
-				// 			rf.matchIndex[x] = appendArgs.PrevLogIndex + len(appendArgs.Entries)
-				// 			rf.nextIndex[x] = rf.matchIndex[x] + 1
-				// 			DPrintf("leader %d at term %d change next idx record for replica %d: %d -> %d", rf.me, rf.currentTerm, x, prev_nextidx, rf.nextIndex[x])
-				// 		} else {
-				// 			DPrintf("[%d] Append real entry from %d to %d rejected, decrement nextIndex ", rf.me, rf.me, x)
-				// 			rf.nextIndex[x] = rf.decrementStrategy(rf.nextIndex[x])
-				// 		}
-				// 		return
-
-				// 	}
-				// }(i)
-				// //go rf.tryAppendEntries(i, rf.currentTerm)
 
 			}
 		}
@@ -576,8 +500,6 @@ func (rf *Raft) heartBeatPerPeer(x int, term int) {
 	appendArgs.Entries = entries
 
 
-	//lastIndexTmp := rf.logs[len(rf.logs)-1].Index
-	//idLastIndexTmp := rf.nextIndex[x]
 	rf.mu.Unlock()
 	ok := rf.sendAppendEntries(x, &appendArgs, &appendReply)
 	if !ok {
@@ -611,68 +533,6 @@ func (rf *Raft) heartBeatPerPeer(x int, term int) {
 
 	}	
 }
-// func (rf *Raft) tryAppendEntries(id int, initTerm int){
-// 	retry := true
-// 	for !rf.killed() && retry{
-// 		rf.mu.Lock()
-// 		if rf.status != Leader || rf.currentTerm != initTerm{
-// 			rf.mu.Unlock()
-// 			return
-// 		}
-// 		lastIndexTmp := rf.logs[len(rf.logs)-1].Index
-// 		idLastIndexTmp := rf.nextIndex[id]
-// 		rf.mu.Unlock()
-
-// 		if lastIndexTmp >= idLastIndexTmp { //I'm not sure whether to lock this if condition [WARNING]
-// 			rf.mu.Lock()
-// 			//appendArgs, appendReply := rf.prepareAppendEntriesArg(rf.nextIndex[id])
-// 			//below code before Unlock is preparing entry
-// 			//Question: should we use the latest log instead of nextIndex in the first iteration? Idk.
-// 			DPrintf("%d as leader, preparing real appendEntries: the PrevLogIndex for id %d is %d", rf.me, id, rf.logs[rf.nextIndex[id]-1].Index)
-// 			appendArgs := AppendEntriesArgs{Term: initTerm, LeaderId: rf.me, PrevLogIndex: rf.logs[rf.nextIndex[id]-1].Index, PrevLogTerm: rf.logs[rf.nextIndex[id]-1].Term, LeaderCommit: rf.commitIndex}
-// 			appendArgs.Entries = []Entry{}
-// 			appendArgs.Entries = append(appendArgs.Entries, rf.logs[rf.nextIndex[id]:]...)
-// 			appendReply:= AppendEntriesReply{}
-// 			newNextIndex := rf.logs[len(rf.logs)-1].Index + 1
-// 			rf.mu.Unlock()
-// 			ok := rf.sendAppendEntries(id, &appendArgs, &appendReply)
-// 			if !ok {
-// 				//DPrintf("[%d][Error] Append real entry from %d to %d failed", rf.me, rf.me, id)
-// 				return
-// 			} else {
-// 				rf.mu.Lock()
-// 				replyTerm := appendReply.Term
-// 				if rf.currentTerm < replyTerm {
-// 					rf.revertToFollower(replyTerm)
-// 					rf.mu.Unlock()
-// 					return
-// 				}
-// 				if replyTerm < rf.currentTerm {
-// 					DPrintf("[%d] Received staled RPC response from %d to %d, continue ", rf.me, rf.me, id)
-// 					rf.mu.Unlock()
-// 					continue
-// 				}
-// 				if appendReply.Success {
-// 					DPrintf("leader %d at term %d append entry request to replica %d succeed", rf.me, rf.currentTerm, id)
-// 					prev_nextidx := rf.nextIndex[id]
-// 					DPrintf("leader %d at term %d change next idx record for replica %d: %d -> %d", rf.me, rf.currentTerm, id, prev_nextidx, newNextIndex)
-// 					rf.nextIndex[id] = newNextIndex
-// 					rf.matchIndex[id] = appendArgs.PrevLogIndex + len(appendArgs.Entries)
-// 					//rf.matchIndex[id] = newNextIndex - 1
-// 					retry = false
-// 				} else {
-// 					DPrintf("[%d] Append real entry from %d to %d rejected, decrement nextIndex ", rf.me, rf.me, id)
-// 					rf.nextIndex[id] = rf.decrementStrategy(rf.nextIndex[id])
-// 				}
-// 				rf.mu.Unlock()
-// 				//return
-
-// 			}
-
-// 		}
-// 	}
-// 	return
-// }
 
 func (rf *Raft) decrementStrategy(oldIndex int) int {
 	//This can be optimized. requires outside lock
@@ -780,115 +640,6 @@ func (rf *Raft) leaderHeartBeat() {
 			for i:= 0; i < len(rf.peers); i++ {
 				if i != rf.me {
 					go rf.heartBeatPerPeer(i, term)
-					// go func (x int) {
-					// 	rf.mu.Lock()
-					// 	appendArgs := AppendEntriesArgs{Term: rf.currentTerm, LeaderId: rf.me, LeaderCommit: rf.commitIndex, PrevLogIndex: rf.logs[rf.nextIndex[x]-1].Index, PrevLogTerm: rf.logs[rf.nextIndex[x]-1].Term}
-					// 	appendReply := AppendEntriesReply{}
-					// 	entries := make([]Entry, len(rf.logs[(appendArgs.PrevLogIndex+1):]))
-					// 	copy(entries, rf.logs[(appendArgs.PrevLogIndex+1):])
-					// 	appendArgs.Entries = entries
-
-
-					// 	//lastIndexTmp := rf.logs[len(rf.logs)-1].Index
-					// 	//idLastIndexTmp := rf.nextIndex[x]
-					// 	rf.mu.Unlock()
-					// 	ok := rf.sendAppendEntries(x, &appendArgs, &appendReply)
-					// 	if !ok {
-					// 		return
-					// 	} else {
-					// 		rf.mu.Lock()
-					// 		defer rf.mu.Unlock()
-					// 		if rf.status != Leader {
-					// 			return
-					// 		}
-					// 		replyTerm := appendReply.Term
-					// 		if rf.currentTerm < replyTerm {
-					// 			rf.revertToFollower(replyTerm)
-					// 			return
-					// 		}
-					// 		if replyTerm < rf.currentTerm {
-					// 			DPrintf("[%d] Received staled RPC response from %d to %d, continue ", rf.me, rf.me, x)
-					// 			return
-					// 		}
-					// 		if appendReply.Success {
-					// 			DPrintf("leader %d at term %d append entry request to replica %d succeed", rf.me, rf.currentTerm, x)
-					// 			prev_nextidx := rf.nextIndex[x]
-					// 			rf.matchIndex[x] = appendArgs.PrevLogIndex + len(appendArgs.Entries)
-					// 			rf.nextIndex[x] = rf.matchIndex[x] + 1
-					// 			DPrintf("leader %d at term %d change next idx record for replica %d: %d -> %d", rf.me, rf.currentTerm, x, prev_nextidx, rf.nextIndex[x])
-					// 		} else {
-					// 			DPrintf("[%d] Append real entry from %d to %d rejected, decrement nextIndex ", rf.me, rf.me, x)
-					// 			rf.nextIndex[x] = rf.decrementStrategy(rf.nextIndex[x])
-					// 		}
-					// 		return
-
-					// 	}
-
-					// 	// if lastIndexTmp >= idLastIndexTmp { //I'm not sure whether to lock this if condition [WARNING]
-					// 	// 	//appendArgs, appendReply := rf.prepareAppendEntriesArg(rf.nextIndex[id])
-					// 	// 	//below code before Unlock is preparing entry
-					// 	// 	//Question: should we use the latest log instead of nextIndex in the first iteration? Idk.
-					// 	// 	DPrintf("%d as leader, preparing heartbeat with real appendEntries: the PrevLogIndex for id %d is %d", rf.me, x, rf.logs[rf.nextIndex[x]-1].Index)
-					// 	// 	rf.mu.Lock()
-					// 	// 	appendArgs.Entries = []Entry{}
-					// 	// 	appendArgs.Entries = append(appendArgs.Entries, rf.logs[rf.nextIndex[x]:]...)
-					// 	// 	//appendReply:= AppendEntriesReply{}
-					// 	// 	newNextIndex := rf.logs[len(rf.logs)-1].Index + 1
-					// 	// 	rf.mu.Unlock()
-					// 	// }
-					// 	// ok := rf.sendAppendEntries(x, &appendArgs, &appendReply)
-					// 	// 	if !ok {
-					// 	// 		DPrintf("[%d][Error] New heartbeat with real entry append from %d to %d not responded", rf.me, rf.me, x)
-					// 	// 		return
-					// 	// 	} else {
-					// 	// 		rf.mu.Lock()
-					// 	// 		defer rf.mu.Unlock()
-					// 	// 		replyTerm := appendReply.Term
-					// 	// 		if rf.currentTerm < replyTerm {
-					// 	// 			rf.revertToFollower(replyTerm)
-					// 	// 			return
-					// 	// 		}
-					// 	// 		if replyTerm < rf.currentTerm {
-					// 	// 			DPrintf("[%d] Received staled RPC response from %d to %d, continue ", rf.me, rf.me, x)
-					// 	// 			return
-					// 	// 		}
-					// 	// 		if appendReply.Success {
-					// 	// 			DPrintf("leader %d at term %d append entry request to replica %d succeed", rf.me, rf.currentTerm, x)
-					// 	// 			prev_nextidx := rf.nextIndex[x]
-					// 	// 			DPrintf("leader %d at term %d change next idx record for replica %d: %d -> %d", rf.me, rf.currentTerm, x, prev_nextidx, newNextIndex)
-					// 	// 			rf.nextIndex[x] = newNextIndex
-					// 	// 			rf.matchIndex[x] = appendArgs.PrevLogIndex + len(appendArgs.Entries)
-					// 	// 			//rf.matchIndex[id] = newNextIndex - 1
-					// 	// 		} else {
-					// 	// 			DPrintf("[%d] Append real entry from %d to %d rejected, decrement nextIndex ", rf.me, rf.me, x)
-					// 	// 			rf.nextIndex[x] = rf.decrementStrategy(rf.nextIndex[x])
-					// 	// 		}
-					// 	// 		return
-
-					// 	// 	}
-							
-
-
-
-					// 	// //s_t := time.Now()
-					// 	// DPrintf("%d at term %d send heartbeat to %d, prevLogIndex is %d", rf.me, rf.currentTerm, x, appendArgs.PrevLogIndex)
-					// 	// rf.mu.Unlock()
-					// 	// ok := rf.sendAppendEntries(x, &appendArgs, &appendReply)
-					// 	// if !ok {
-					// 	// 	DPrintf("[%d] [Error] HeartBeat from %d to %d at term %d not responded", rf.me, rf.me, x, appendArgs.Term)
-					// 	// 	//log.Println("sent at ", s_t)
-					// 	// 	return
-					// 	// } else {
-					// 	// 	rf.mu.Lock()
-					// 	// 	defer rf.mu.Unlock()
-					// 	// 	replyTerm := appendReply.Term
-					// 	// 	if rf.currentTerm < replyTerm{
-					// 	// 		rf.revertToFollower(replyTerm)
-					// 	// 	}
-					// 	// 	//if appendReply is from an older term -- currently we do nothing (therefore naturally drop it)
-					// 	// 	return
-					// 	// }
-					// }(i)
 				}
 			}
 		} else {
@@ -980,12 +731,7 @@ func (rf *Raft) initVoting() {
 		go rf.leaderHeartBeat()
 
 
-		//WARNING[I'm not sure the order of the below section]
-		// for i := 0; i < len(rf.nextIndex); i++ {
-		// 	rf.nextIndex[i] = rf.logs[len(rf.logs)-1].Index + 1
-		// }
-		//DPrintf("%d start leader heartbeat", rf.me)
-		//go rf.commiter()
+
 		return 
 	} else {
 		DPrintf("[%d], loss election at term %d!", rf.me, votingTerm)
@@ -1003,15 +749,6 @@ func (rf *Raft) applyChMessenger(applyCh chan ApplyMsg) {
 	it := 0
 	for !rf.killed() {
 		rf.mu.Lock()
-		//DPrintf("it is %d", it)
-		//DPrintf("%d: prev_commited is %d, rf.commitIndex is %d", rf.me, prev_commited, rf.commitIndex)
-
-		// if prev_commited == rf.commitIndex {
-		// 	DPrintf("%d applyChMsnger woke up but need to wait", rf.me)
-		// 	rf.mu.Unlock()
-		// 	time.Sleep(VoteSleep * time.Millisecond)
-		// 	continue
-		// }
 
 		for prev_commited == rf.commitIndex {
 			//DPrintf("%d applyChMsnger woke up but need to wait", rf.me)
