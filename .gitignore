@@ -1,2 +1,4 @@
 .DS_Store/
 *S_Store
+*log
+*err

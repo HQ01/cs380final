@@ -38,8 +38,8 @@ const(
 )
 
 const(
-	VoteTimeOutLower = 400 //350
-	VoteTimeOutUpper = 600 //500
+	VoteTimeOutLower = 350 //350
+	VoteTimeOutUpper = 500 //500
 	VoteSleep		 = 50
 	DefaultSleep 	 = 20
 	HeartBeatSleep	 = 100
@@ -208,6 +208,11 @@ type AppendEntriesArgs struct {
 type AppendEntriesReply struct {
 	Term			int
 	Success			bool
+
+	
+	//for faster log backtracking
+	ConflictIndex	int
+	ConflictTerm	int
 }
 
 //common functionality wrapper
@@ -289,10 +294,20 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		reply.Term = rf.currentTerm
 		if args.PrevLogIndex > rf.logs[len(rf.logs)-1].Index {
 			reply.Success = false
+			reply.ConflictIndex = rf.logs[len(rf.logs)-1].Index + 1
+			reply.ConflictTerm = -1
 			return
 		}
 		if rf.logs[args.PrevLogIndex].Term != args.PrevLogTerm {
 			reply.Success = false
+			reply.ConflictTerm = rf.logs[args.PrevLogIndex].Term
+			reply.ConflictIndex = rf.lowerBsearchIdx(reply.ConflictTerm)
+			if reply.ConflictIndex > rf.logs[len(rf.logs)-1].Index {
+				DPrintf("[%d] WARNING: leader want us to find a term that does not exists and is too high, with search term %d", rf.me, reply.ConflictTerm)
+			}
+ 			if rf.logs[reply.ConflictIndex].Term != reply.ConflictTerm {
+				DPrintf("%d: follower does not find matching search term with found lower bound index %d, search term %d", rf.me, reply.ConflictIndex, reply.ConflictTerm)
+			}
 			return
 		}
 		if len(args.Entries) > 0 {
@@ -327,6 +342,13 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	return
 
 	
+}
+
+func (rf *Raft) lowerBsearchIdx(searchTerm int) int{
+	//assume outside lock
+	tmp := sort.Search(len(rf.logs), func(i int) bool { return rf.logs[i].Index >= searchTerm})
+
+	return tmp
 }
 
 func (rf *Raft) appendEntriesResolver(entries []Entry, prevLogIndex int) {
@@ -496,6 +518,7 @@ func (rf *Raft) heartBeatPerPeer(x int, term int) {
 	appendArgs := AppendEntriesArgs{Term: term, LeaderId: rf.me, LeaderCommit: rf.commitIndex, PrevLogIndex: rf.logs[rf.nextIndex[x]-1].Index, PrevLogTerm: rf.logs[rf.nextIndex[x]-1].Term}
 	appendReply := AppendEntriesReply{}
 	entries := make([]Entry, len(rf.logs[(appendArgs.PrevLogIndex+1):]))
+	originalNextIdx := rf.nextIndex[x]
 	copy(entries, rf.logs[(appendArgs.PrevLogIndex+1):])
 	appendArgs.Entries = entries
 
@@ -521,26 +544,95 @@ func (rf *Raft) heartBeatPerPeer(x int, term int) {
 		}
 		if appendReply.Success {
 			DPrintf("leader %d at term %d append entry request to replica %d succeed", rf.me, rf.currentTerm, x)
-			prev_nextidx := rf.nextIndex[x]
+			prev_nextidx := originalNextIdx
 			rf.matchIndex[x] = appendArgs.PrevLogIndex + len(appendArgs.Entries)
 			rf.nextIndex[x] = rf.matchIndex[x] + 1
 			DPrintf("leader %d at term %d change next idx record for replica %d: %d -> %d", rf.me, rf.currentTerm, x, prev_nextidx, rf.nextIndex[x])
 		} else {
 			DPrintf("[%d] Append real entry from %d to %d rejected, decrement nextIndex ", rf.me, rf.me, x)
-			rf.nextIndex[x] = rf.decrementStrategy(rf.nextIndex[x])
+			rf.nextIndex[x] = rf.decrementStrategy(originalNextIdx, appendReply.ConflictTerm, appendReply.ConflictIndex, x)
 		}
 		return
 
 	}	
 }
 
-func (rf *Raft) decrementStrategy(oldIndex int) int {
+func (rf *Raft) decrementStrategy(oldIndex int, conflictTerm int, conflictIndex int, replyer int) int {
 	//This can be optimized. requires outside lock
 	if oldIndex == 0 {
 		DPrintf("[%d] HUGE MISTAKE try to decrement nextIndex to negative", rf.me)
 	}
-	return oldIndex - 1
+
+	//decrement 1 at a time [DEPRECATED]
+	//return oldIndex - 1
+	if conflictTerm == 0 || conflictIndex == 0 {
+		DPrintf("[%d] WARNING fail append entries but conflict term and confclit index not initialied", rf.me)
+	}
+
+	if conflictTerm == -1 {
+		DPrintf("%d leader cannot find the index with conflict term %d for replyer %d: term not specified", rf.me, conflictTerm, replyer)
+		return conflictIndex
+	}
+
+	tmp := rf.upperBsearchIdx(conflictTerm)
+	if tmp > rf.logs[len(rf.logs)-1].Index || rf.logs[tmp].Term != conflictTerm {
+		DPrintf("%d leader cannot find the index with conflict term %d for replyer %d, with the found idx as %d", rf.me, conflictTerm, replyer, tmp)
+		return conflictIndex
+	}
+
+	return tmp + 1
+
+
 }
+
+func (rf *Raft) upperBsearchIdx(searchTerm int) int{
+	//assume outside lock
+	n := len(rf.logs)
+	tmp := rf.upperBsearch(rf.logs, 0, n-1, searchTerm, n)
+	//tmp := rf.upperBsearch(len(rf.logs), func(i int) bool { return rf.logs[i].Index <= searchTerm})
+	
+	return tmp
+
+
+}
+
+func (rf *Raft) upperBsearch(arr []Entry, low int, high int, targetTerm int, n int) int {
+	if high >= low {
+		mid := low + (high - low) / 2
+		if (mid == n-1 || targetTerm < arr[mid + 1].Term) && arr[mid].Term == targetTerm {
+			return mid
+		} else {
+			if (targetTerm < arr[mid].Term) {
+				return rf.upperBsearch(arr, low, mid - 1, targetTerm, n)
+			} else {
+				return rf.upperBsearch(arr, mid + 1, high, targetTerm, n)
+			}
+		}
+	}
+
+	return n
+	
+}
+
+
+// func (rf *Raft) upperBsearch(n int, f func(int) bool) int {
+// 	//Define f(-1) == true and f(n) == false
+// 	//Invariant: f(i) == true, f(j+1) == false
+// 	//for ascendig sorted array: f is l[i] <= target
+// 	i, j := 0, n
+// 	for i <= j {
+// 		h := int(uint(i+j) >> 1)
+// 		//i <= h < j
+// 		if !f(h) {
+// 			j = h - 1 //preserving f(j+1) = false
+// 		} else {
+// 			i = h //preserving f(i) = true
+// 		}
+// 	}
+
+// 	//i = j, f(i) is true, f(j+1)=f(i+1) is false, anwer is i
+// 	return i
+// }
 
 
 
