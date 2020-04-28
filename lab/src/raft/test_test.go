@@ -928,20 +928,24 @@ func internalChurn(t *testing.T, unreliable bool) {
 	for iters := 0; iters < 20; iters++ {
 		if (rand.Int() % 1000) < 200 {
 			i := rand.Int() % servers
+			DPrintf("CONFIG: disconnect %d", i)
 			cfg.disconnect(i)
 		}
 
 		if (rand.Int() % 1000) < 500 {
 			i := rand.Int() % servers
 			if cfg.rafts[i] == nil {
+				DPrintf("CONFIG: reload %d", i)
 				cfg.start1(i)
 			}
+			DPrintf("CONFIG: reconnect %d",i)
 			cfg.connect(i)
 		}
 
 		if (rand.Int() % 1000) < 200 {
 			i := rand.Int() % servers
 			if cfg.rafts[i] != nil {
+				DPrintf("CONFIG: crash %d", i)
 				cfg.crash1(i)
 			}
 		}
@@ -957,6 +961,7 @@ func internalChurn(t *testing.T, unreliable bool) {
 	cfg.setunreliable(false)
 	for i := 0; i < servers; i++ {
 		if cfg.rafts[i] == nil {
+			DPrintf("CONFIG: the server is not reloaded before : %d", i)
 			cfg.start1(i)
 		}
 		cfg.connect(i)
@@ -972,10 +977,12 @@ func internalChurn(t *testing.T, unreliable bool) {
 		}
 		values = append(values, vv...)
 	}
+	//above check whether client has at least 1 response from raft.
 
 	time.Sleep(RaftElectionTimeout)
 
 	lastIndex := cfg.one(rand.Int(), servers, true)
+	DPrintf("TESTACTION: final commit in churn test 2C")
 
 	really := make([]int, lastIndex+1)
 	for index := 1; index <= lastIndex; index++ {

@@ -27,8 +27,8 @@ import (
 )
 
 
-// import "bytes"
-// import "../labgob"
+import "bytes"
+import "../labgob"
 const(
 	Leader = iota
 	Follower
@@ -66,6 +66,7 @@ type ApplyMsg struct {
 //
 type Raft struct {
 	mu        sync.Mutex          // Lock to protect shared access to this peer's state
+	chmu	  sync.Mutex		  // Lock to serialize channel
 	peers     []*labrpc.ClientEnd // RPC end points of all peers
 	persister *Persister          // Object to hold this peer's persisted state
 	me        int                 // this peer's index into peers[]
@@ -143,6 +144,13 @@ func (rf *Raft) persist() {
 	// e.Encode(rf.yyy)
 	// data := w.Bytes()
 	// rf.persister.SaveRaftState(data)
+	w := new(bytes.Buffer)
+	e := labgob.NewEncoder(w)
+	e.Encode(rf.currentTerm)
+	e.Encode(rf.votedFor)
+	e.Encode(rf.logs)
+	data := w.Bytes()
+	rf.persister.SaveRaftState(data)
 }
 
 
@@ -166,6 +174,22 @@ func (rf *Raft) readPersist(data []byte) {
 	//   rf.xxx = xxx
 	//   rf.yyy = yyy
 	// }
+	r := bytes.NewBuffer(data)
+	d := labgob.NewDecoder(r)
+	var currentTerm int
+	var votedFor int
+	var log []Entry
+	if d.Decode(&currentTerm) != nil ||
+        d.Decode(&votedFor) != nil ||
+        d.Decode(&log) != nil {
+        // error...
+        panic("fail to decode state")
+    } else {
+        rf.currentTerm = currentTerm
+        rf.votedFor = votedFor
+        rf.logs = log
+	}
+	DPrintf("ATTENTION: %d revived, log length %d, current term %d, status %d, lastentry term %d", rf.me, len(rf.logs), rf.currentTerm, rf.status, rf.logs[len(rf.logs)-1].Term)
 }
 
 
@@ -234,6 +258,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (2A, 2B).
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
+	defer rf.persist()
 
 	
 	if rf.currentTerm > args.Term {
@@ -276,6 +301,8 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
+	defer rf.persist()
+
 	if rf.currentTerm > args.Term {
 		reply.Success = false
 		reply.Term = rf.currentTerm
@@ -301,9 +328,17 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		if rf.logs[args.PrevLogIndex].Term != args.PrevLogTerm {
 			reply.Success = false
 			reply.ConflictTerm = rf.logs[args.PrevLogIndex].Term
+			//log.Println("the term try to find is", reply.ConflictTerm)
+			logtermtmp := []int{}
+			for _, e := range rf.logs {
+				logtermtmp = append(logtermtmp, e.Term)
+			}
+			//log.Println("the term array is ", logtermtmp)
 			reply.ConflictIndex = rf.lowerBsearchIdx(reply.ConflictTerm)
+			//log.Println("the found idx is ", reply.ConflictIndex)
+
 			if reply.ConflictIndex > rf.logs[len(rf.logs)-1].Index {
-				DPrintf("[%d] WARNING: leader want us to find a term that does not exists and is too high, with search term %d", rf.me, reply.ConflictTerm)
+				DPrintf("[%d] WARNING: leader want us to find a term that does not exists and is too high, with search term %d", rf.me, reply.ConflictTerm)				
 			}
  			if rf.logs[reply.ConflictIndex].Term != reply.ConflictTerm {
 				DPrintf("%d: follower does not find matching search term with found lower bound index %d, search term %d", rf.me, reply.ConflictIndex, reply.ConflictTerm)
@@ -346,7 +381,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 func (rf *Raft) lowerBsearchIdx(searchTerm int) int{
 	//assume outside lock
-	tmp := sort.Search(len(rf.logs), func(i int) bool { return rf.logs[i].Index >= searchTerm})
+	tmp := sort.Search(len(rf.logs), func(i int) bool { return rf.logs[i].Term >= searchTerm})
 
 	return tmp
 }
@@ -453,6 +488,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	
 	newLogEntry := Entry{Index: rf.logs[len(rf.logs)-1].Index + 1, Op: parsed, Term: rf.currentTerm}
 	rf.logs = append(rf.logs, newLogEntry)
+	rf.persist()
 	rf.matchIndex[rf.me] = index
 	rf.nextIndex[rf.me] = index + 1
 	
@@ -476,6 +512,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 // should call killed() to check whether it should stop.
 //
 func (rf *Raft) Kill() {
+	DPrintf("ATTENTION: %d get killed, log length %d, current term %d, status %d, lastentry term %d", rf.me, len(rf.logs), rf.currentTerm, rf.status, rf.logs[len(rf.logs)-1].Term)
 	atomic.StoreInt32(&rf.dead, 1)
 	// Your code here, if desired.
 }
@@ -536,6 +573,7 @@ func (rf *Raft) heartBeatPerPeer(x int, term int) {
 		replyTerm := appendReply.Term
 		if rf.currentTerm < replyTerm {
 			rf.revertToFollower(replyTerm)
+			rf.persist()
 			return
 		}
 		if replyTerm < rf.currentTerm {
@@ -750,6 +788,7 @@ func (rf *Raft) initVoting() {
 	
 	//change shared status variable
 	rf.mu.Lock()
+	//defer rf.mu.Unlock()
 	DPrintf("%d start initVoting function", rf.me)
 
 	rf.voteTimeOutBase = time.Now()
@@ -761,6 +800,7 @@ func (rf *Raft) initVoting() {
 	cond := sync.NewCond(&rf.mu)
 	votingTerm := rf.currentTerm
 	yay_count, total_count := 1, 1 //vote for the server itself
+	rf.persist()
 
 	rf.mu.Unlock()
 	for i := 0; i < len(rf.peers); i++ {
@@ -785,6 +825,7 @@ func (rf *Raft) initVoting() {
 				if rf.currentTerm < replyTerm {
 					rf.revertToFollower(replyTerm)
 					total_count++
+					rf.persist()
 					cond.Broadcast()
 					return
 			
@@ -819,6 +860,7 @@ func (rf *Raft) initVoting() {
 		// rf.voteTimeOutBase = time.Now() (No need to reset time when you become the leader?)
 		for i := 0; i < len(rf.nextIndex); i++ {
 			rf.nextIndex[i] = rf.logs[len(rf.logs)-1].Index + 1
+			rf.matchIndex[i] = 0
 		}
 		go rf.leaderHeartBeat()
 
@@ -851,6 +893,7 @@ func (rf *Raft) applyChMessenger(applyCh chan ApplyMsg) {
 		}
 		DPrintf("%d applyChMessenger wake up, prev_commited is %d and new commitIndex is %d", rf.me, prev_commited, rf.commitIndex)
 		go func (prev_commited int, new_commited int) {
+			rf.chmu.Lock()
 			for i := prev_commited + 1; i <= new_commited; i++ {
 				rf.mu.Lock()
 				applyChMsg := ApplyMsg{CommandValid: true, Command: rf.logs[i].Op, CommandIndex: i}
@@ -859,6 +902,7 @@ func (rf *Raft) applyChMessenger(applyCh chan ApplyMsg) {
 				DPrintf("%d send applyCh msg at index %d, at time %v", rf.me, i, time.Now())
 				
 			}
+			rf.chmu.Unlock()
 		}(prev_commited, rf.commitIndex)
 		
 		prev_commited = rf.commitIndex
