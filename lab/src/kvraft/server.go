@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-const Debug = 1
+const Debug = 0
 
 func DPrintf(format string, a ...interface{}) (n int, err error) {
 	if Debug > 0 {
@@ -35,6 +35,7 @@ type Op struct {
 	Key		string
 	Value	string
 	ClerkId	int64
+	RequestId int
 }
 
 type KVServer struct {
@@ -69,14 +70,10 @@ func (kv *KVServer) wait(index int, op Op) bool {
 			return false
 		case <- time.After(raft.VoteTimeOutUpper * time.Millisecond):
 			kv.mu.Lock()
-			DPrintf("Server %d timed out", kv.me)
-			defer kv.mu.Unlock()
-			_, isLeader := kv.rf.GetState()
-			if !isLeader {
-				DPrintf("Server %d is no longer leader; abort", kv.me)
-				delete(kv.handler, index)
-				return false
-			}
+			DPrintf("Server %d time out", kv.me)
+			delete(kv.handler, index)
+			kv.mu.Unlock()
+			return false
 		}
 	}
 }
@@ -84,7 +81,7 @@ func (kv *KVServer) wait(index int, op Op) bool {
 
 func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 	// Your code here.
-	op := Op{Method: GET, Key: args.Key, ClerkId: args.ClerkId}
+	op := Op{Method: GET, Key: args.Key, ClerkId: args.ClerkId, RequestId: args.RequestId}
 
 	kv.mu.Lock()
 	index, _, isLeader := kv.rf.Start(op)
@@ -112,7 +109,7 @@ func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 
 func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	// Your code here.
-	op := Op{Method: PUT, Key: args.Key, Value: args.Value, ClerkId: args.ClerkId}
+	op := Op{Method: PUT, Key: args.Key, Value: args.Value, ClerkId: args.ClerkId, RequestId: args.RequestId}
 	if args.Op == "Append" {
 		op.Method = APPEND
 	}
@@ -126,19 +123,7 @@ func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	} else {
 		ok := kv.wait(index, op)
 		if ok {
-			kv.mu.Lock()
-			_, prs := kv.kvmap[args.Key]
-			if prs {
-				reply.Err = OK
-				if args.Op == "Put" {
-					kv.kvmap[args.Key] = args.Value
-				} else {
-					kv.kvmap[args.Key] += args.Value
-				}
-			} else {
-				kv.kvmap[args.Key] = args.Value
-			}
-			kv.mu.Unlock()
+			reply.Err = OK
 		} else {
 			reply.Err = ErrWrongLeader
 		}
@@ -152,17 +137,24 @@ func (kv *KVServer) listening() {
 			kv.mu.Lock()
 			DPrintf("Server %d get msg %v", kv.me, msg)
 			op := msg.Command.(Op)
-			if op.Method != GET {
-				if op.Method == PUT {
-					kv.kvmap[op.Key] = kv.kvmap[op.Value]
+			if op.Method != GET { // need to check duplicate request first
+				requestId, prs := kv.lastRequestId[op.ClerkId]
+				if prs && requestId >= op.RequestId {
+					DPrintf("Server %d found duplicated request id %d from Client %d", kv.me, requestId, op.ClerkId)
 				} else {
-					kv.kvmap[op.Key] += kv.kvmap[op.Value]
+					kv.lastRequestId[op.ClerkId] = op.RequestId
+					if op.Method == PUT {
+						kv.kvmap[op.Key] = op.Value
+					} else {
+						kv.kvmap[op.Key] += op.Value
+					}
 				}
 			}
 			channel, prs := kv.handler[msg.CommandIndex]
 			if prs {
 				channel <- msg
 			}
+			DPrintf("Server %d kvmap: %v", kv.me, kv.kvmap)
 			kv.mu.Unlock()
 		}
 	}
@@ -215,6 +207,7 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	// You may need initialization code here.
 	kv.kvmap = make(map[string]string)
 	kv.handler = make(map[int]chan raft.ApplyMsg)
+	kv.lastRequestId = make(map[int64]int)
 
 	kv.applyCh = make(chan raft.ApplyMsg)
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)

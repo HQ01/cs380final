@@ -45,14 +45,12 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 func (ck *Clerk) Get(key string) string {
 
 	// You will have to modify this function.
-	
+	args := GetArgs{Key: key, ClerkId: ck.id, RequestId: ck.requestId}
 	reply := new(GetReply)
 	DPrintf("Clerk %d starts GET key: %s", ck.id, key)
 	idx := ck.knownLeader
 	for reply.Err != OK {
-		args := GetArgs{Key: key, ClerkId: ck.id, RequestId: ck.requestId}
 		ok := ck.servers[idx].Call("KVServer.Get", &args, &reply)
-		ck.requestId++
 		if !ok || reply.Err == ErrWrongLeader {
 			newLeader := (idx + 1) % len(ck.servers)
 			DPrintf("Clerk %d finds bad leader %d; change to %d", ck.id, idx, newLeader)
@@ -64,6 +62,7 @@ func (ck *Clerk) Get(key string) string {
 	}
 	DPrintf("Clerk %d gets reply: %v", ck.id, reply)
 	ck.knownLeader = idx
+	ck.requestId++
 	return reply.Value
 }
 
@@ -79,13 +78,12 @@ func (ck *Clerk) Get(key string) string {
 //
 func (ck *Clerk) PutAppend(key string, value string, op string) {
 	// You will have to modify this function.
+	args := PutAppendArgs{Key: key, Value: value, Op: op, ClerkId: ck.id, RequestId: ck.requestId}
 	reply := new(PutAppendReply)
 	DPrintf("Clerk %d starts %s key: %s value: %s", ck.id, op, key, value)
 	idx := ck.knownLeader
 	for reply.Err != OK {
-		args := PutAppendArgs{Key: key, Value: value, Op: op, ClerkId: ck.id, RequestId: ck.requestId}
 		ok := ck.servers[idx].Call("KVServer.PutAppend", &args, &reply)
-		ck.requestId++
 		if !ok || reply.Err == ErrWrongLeader {
 			newLeader := (idx + 1) % len(ck.servers)
 			DPrintf("Clerk %d bad leader %d; change to %d", ck.id, idx, newLeader)
@@ -94,7 +92,8 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 		}
 	}
 	ck.knownLeader = idx
-	DPrintf("Clerk %d get reply", ck.id)
+	ck.requestId++
+	DPrintf("Clerk %d gets reply %v", ck.id, reply)
 }
 
 func (ck *Clerk) Put(key string, value string) {
