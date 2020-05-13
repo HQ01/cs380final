@@ -110,8 +110,9 @@ func (kv *KVServer) applyChHandler() {
 	}
 }
 
-
-
+// Logic:
+// If not leader, return and let Clerk find a new one
+// Create a new channel,
 func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 	DPrintf3("%d get %s, #: %d", kv.me, args.Key, args.RequestID)
 	if _, isLeader := kv.rf.GetState(); !isLeader {
@@ -124,11 +125,13 @@ func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 		kv.callbackCh[args.RequestID] = make(chan Log)
 	}
 	commitIdx, ok := kv.reqCommitIdx[args.RequestID]
-	kv.mu.Unlock()
 	if ok {
+		// If the request has been committed
 		reply.Value = kv.committedLogs[commitIdx].cmd.Value
+		kv.mu.Unlock()
 		return
 	}
+	kv.mu.Unlock()
 	_, curTerm, _ := kv.rf.Start(newOp)
 	select {
 	case <- time.After(time.Second * 1):
@@ -137,7 +140,6 @@ func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 		 //close(kv.callbackCh[args.RequestID])
 		 delete(kv.callbackCh, args.RequestID)
 		 kv.mu.Unlock()
-		 DPrintf3("%d get timeout", kv.me)
 		 return
 	case log := <- kv.callbackCh[args.RequestID]:
 		 if log.term != curTerm {
@@ -156,10 +158,13 @@ func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 		reply.Err = "NotLeader"
 		return
 	}
+	kv.mu.Lock()
 	if _, ok := kv.reqCommitIdx[args.RequestID]; ok {
 		reply.Err = "ExpiredRequest"
+		kv.mu.Unlock()
 		return
 	}
+	kv.mu.Unlock()
 
 	newOp := Op{
 		Key: args.Key,
