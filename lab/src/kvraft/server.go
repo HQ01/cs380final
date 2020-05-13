@@ -96,14 +96,12 @@ func (kv *KVServer) applyChHandler() {
 			} else {
 				DPrintf3("%d: Type assertion in applyChHandler failed!", kv.me)
 			}
-			kv.mu.Unlock()
 			if ch, ok := kv.callbackCh[cmd.ClientRequestID]; ok {
 				ch <- kv.committedLogs[msg.CommandIndex]
 				//close(ch)
-				kv.mu.Lock()
 				delete(kv.callbackCh, cmd.ClientRequestID)
-				kv.mu.Unlock()
 			}
+			kv.mu.Unlock()
 		} else {
 			DPrintf3("%d: msg invalid!", kv.me)
 		}
@@ -124,6 +122,7 @@ func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 	if _, ok := kv.callbackCh[args.RequestID]; !ok {
 		kv.callbackCh[args.RequestID] = make(chan Log)
 	}
+	ch := kv.callbackCh[args.RequestID]
 	commitIdx, ok := kv.reqCommitIdx[args.RequestID]
 	if ok {
 		// If the request has been committed
@@ -141,7 +140,7 @@ func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 		 delete(kv.callbackCh, args.RequestID)
 		 kv.mu.Unlock()
 		 return
-	case log := <- kv.callbackCh[args.RequestID]:
+	case log := <- ch:
 		 if log.term != curTerm {
 			 reply.Err = "NotLeader"
 			 return
@@ -181,6 +180,7 @@ func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	if _, ok := kv.callbackCh[args.RequestID]; !ok {
 		kv.callbackCh[args.RequestID] = make(chan Log)
 	}
+	ch := kv.callbackCh[args.RequestID]
 	kv.mu.Unlock()
 	_, curTerm, _ := kv.rf.Start(newOp)
 	select {
@@ -192,7 +192,7 @@ func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 		 delete(kv.callbackCh, args.RequestID)
 		 kv.mu.Unlock()
 		 return
-	case log := <- kv.callbackCh[args.RequestID]:
+	case log := <- ch:
 		 if log.term != curTerm {
 			 reply.Err = "NotLeader"
 			 return
