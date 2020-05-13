@@ -335,7 +335,7 @@ func (cfg *config) Leader() (bool, int) {
 	return false, 0
 }
 
-// Partition servers into 2 groups and put current leader in minority
+// Partition servers into 2 groups and put current leaderID in minority
 func (cfg *config) make_partition() ([]int, []int) {
 	_, l := cfg.Leader()
 	p1 := make([]int, cfg.n/2+1)

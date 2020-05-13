@@ -59,6 +59,8 @@ type ApplyMsg struct {
 	CommandValid bool
 	Command      interface{}
 	CommandIndex int
+	RaftTerm int
+	//LeaderIndex	 int
 }
 
 //
@@ -484,9 +486,9 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	index := rf.logs[len(rf.logs)-1].Index + 1
 	term := rf.currentTerm
 	isLeader := true
-	parsed := rf.parseCommand(command)
+	//parsed := rf.parseCommand(command)
 	
-	newLogEntry := Entry{Index: rf.logs[len(rf.logs)-1].Index + 1, Op: parsed, Term: rf.currentTerm}
+	newLogEntry := Entry{Index: rf.logs[len(rf.logs)-1].Index + 1, Op: command, Term: rf.currentTerm}
 	rf.logs = append(rf.logs, newLogEntry)
 	rf.persist()
 	rf.matchIndex[rf.me] = index
@@ -494,7 +496,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	
 	
 	DPrintf("%d as leader at term %d start agreement on index %d, command %v", rf.me, term, index, command)
-	go rf.startAgreement(parsed)
+	go rf.startAgreement(command)
 
 
 	return index, term, isLeader
@@ -725,7 +727,7 @@ func (rf *Raft) newCommitIndexFinder() (int, bool) {
 
 }
 //function for leader to check commit
-func (rf *Raft) commiter() {
+func (rf *Raft) committer() {
 	for !rf.killed() {
 		rf.mu.Lock()
 
@@ -896,7 +898,7 @@ func (rf *Raft) applyChMessenger(applyCh chan ApplyMsg) {
 			rf.chmu.Lock()
 			for i := prev_commited + 1; i <= new_commited; i++ {
 				rf.mu.Lock()
-				applyChMsg := ApplyMsg{CommandValid: true, Command: rf.logs[i].Op, CommandIndex: i}
+				applyChMsg := ApplyMsg{CommandValid: true, Command: rf.logs[i].Op, CommandIndex: i, RaftTerm: rf.currentTerm}
 				rf.mu.Unlock()
 				applyCh <- applyChMsg
 				DPrintf("%d send applyCh msg at index %d, at time %v", rf.me, i, time.Now())
@@ -976,7 +978,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.readPersist(persister.ReadRaftState())
 
 	go rf.statusChecker()
-	go rf.commiter()
+	go rf.committer()
 	go rf.applyChMessenger(applyCh)
 
 	DPrintf("%d initialized, ", rf.me)
@@ -996,7 +998,7 @@ including entries created by previous leaders.
 4) Leader keep track of the highest index it knows to be committed. Send it to followers in heartbeat.
 5) Add a logic to handle retry the AppendEntriesRPC
 6) When a leader cames into power, it initialize all nextIndex values to the index just after the last one in its log.\\
-7) We need a commiter()
+7) We need a committer()
 
 
 **/
